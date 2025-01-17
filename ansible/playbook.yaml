@@ -1,0 +1,89 @@
+---
+- hosts: alphahost
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Ensure DOCKER_HOST is loaded in current session
+      shell: 'export DOCKER_HOST="tcp://dind-service:2375"'
+      environment:
+        DOCKER_HOST: "tcp://dind-service:2375"
+  
+
+    - name: Ensure kubectl is installed
+      shell: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+      args:
+        executable: /bin/bash
+      register: kubectl_install
+      changed_when: "'kubectl' not in kubectl_install.stdout"
+
+    - name: Verify kubectl installation
+      command: kubectl version --client
+      register: kubectl_version
+      changed_when: no
+
+    - name: Install Helm
+      shell: |
+        curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+      args:
+        executable: /bin/bash
+      register: helm_install
+      changed_when: "'Helm' not in helm_install.stdout"
+
+    - name: Verify Helm installation
+      command: helm version
+      register: helm_version
+      changed_when: no
+
+    - name: Check if Google Cloud SDK is already installed
+      stat:
+        path: /usr/local/bin/gcloud
+      register: gcloud_check
+
+    - name: Download and install Google Cloud SDK if not installed
+      shell: |
+        curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-408.0.0-linux-x86_64.tar.gz
+        tar -xzf google-cloud-sdk-408.0.0-linux-x86_64.tar.gz
+        ./google-cloud-sdk/install.sh -q
+        ./google-cloud-sdk/bin/gcloud init --skip-diagnostics
+        ln -s /var/jenkins_home/ansible/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud
+      args:
+        executable: /bin/bash
+      when: not gcloud_check.stat.exists
+
+    - name: Ensure gke-gcloud-auth-plugin is installed
+      shell: |
+        gcloud components install gke-gcloud-auth-plugin --quiet
+      environment:
+        USE_GKE_GCLOUD_AUTH_PLUGIN: True
+      args:
+        executable: /bin/bash
+
+    - name: Add gcloud to PATH for all users
+      lineinfile:
+        path: /etc/profile.d/gcloud.sh
+        line: 'export PATH="$PATH:/var/jenkins_home/ansible/google-cloud-sdk/bin"'
+        create: yes
+        state: present
+        mode: '0755'
+
+    - name: Source gcloud in the current session
+      shell: 'source /etc/profile.d/gcloud.sh'
+      args:
+        executable: /bin/bash
+
+    - name: Verify gcloud installation
+      command: ./google-cloud-sdk/bin/gcloud --version
+      register: gcloud_version
+      changed_when: no
+
+    - name: Install Docker
+      shell: 'apt install docker.io -y'
+      args:
+        executable: /bin/bash
+
+  vars:
+    helm_version: v3.10.1  # Specify Helm version if needed

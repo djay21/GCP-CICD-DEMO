@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: APP_NAME
+  namespace: jenkins
+  labels:
+    app: APP_NAME
+spec:
+  selector:
+    app: APP_NAME
+  ports:
+    - protocol: TCP
+      port: 80           # The port that will be exposed by the Service
+      targetPort: 80     # The port that the application is listening on inside the container
+  type: ClusterIP        # Choose ClusterIP, NodePort, or LoadBalancer based on your requirement

@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+    environment {
+        PROJECT_ID = 'test-c5'
+        IMAGE_NAME = 'gcp-demo/node'
+        APP_NAME = "my-app"
+        DOCKER_HOST = "tcp://dind-service:2375"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        CLUSTER_NAME = "primary-k8s"
+        GCR_REGISTRY = "us-central1-docker.pkg.dev"
+        GCR_IMAGE = "${GCR_REGISTRY}/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG}"
+        GOOGLE_APPLICATION_CREDENTIALS = credentials('gcp_access') // Jenkins credential ID for GCP service account
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Activating GCP SA') {
+            steps {
+                script {
+                    sh """
+                    ## Activating Google SA 
+                    cat $GOOGLE_APPLICATION_CREDENTIALS > abc.json
+                    gcloud auth activate-service-account gcp-poc@test-c5.iam.gserviceaccount.com --key-file=abc.json
+                    gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://us-central1-docker.pkg.dev
+                    
+                    ## Build the Docker image
+                    cd node-js-sample
+                    docker build -t ${GCR_IMAGE} .
+                    docker images -a
+                    """
+                }
+            }
+        }
+
+        stage('Push to Google Container Registry') {
+            steps {
+                script {
+                    sh """
+                    docker push ${GCR_IMAGE}
+                    """
+                    
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                        sh """
+                        gcloud container clusters get-credentials ${CLUSTER_NAME} --zone us-central1-a --project ${PROJECT_ID}
+                        cd node-js-sample
+                        sed -i "s|APP_NAME|${APP_NAME}|" k8s/deployment.yaml
+                        sed -i "s|IMAGE_NAME|${GCR_IMAGE}|" k8s/deployment.yaml
+                        sed -i "s|APP_NAME|${APP_NAME}|" k8s/service.yaml
+                        cat k8s/deployment.yaml
+                        kubectl apply -f k8s/
+                        """
+                }
+            }
+        }
+
+        stage('Remove local docker images') {
+            steps {
+                script {
+                        sh """
+                        docker rmi -f ${GCR_IMAGE}
+                        """
+                }
+            }
+        }
+    }
+}
